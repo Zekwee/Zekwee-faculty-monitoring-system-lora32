@@ -1,0 +1,186 @@
+#include <Arduino.h>
+#include <SPI.h>
+#include <LoRa.h>
+#include <Adafruit_SSD1306.h>
+#include <Adafruit_GFX.h>
+#include <Wire.h>
+
+// OLED display dimensions
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+
+// OLED I2C address
+#define OLED_ADDR 0x3C
+
+// LoRa pins for Heltec WiFi LoRa 32
+#define LORA_CS    18
+#define LORA_RST   14
+#define LORA_DIO0  26
+
+// I2C pins for Heltec WiFi LoRa 32 V2 OLED
+#define I2C_SDA    4
+#define I2C_SCL    15
+#define OLED_RST   16
+
+// LoRa Frequency
+#define LORA_FREQ  915E6
+
+// Create OLED display object
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RST);
+
+unsigned long lastSendTime = 0;
+const long sendInterval = 2000;  // Send every 2 seconds
+int messageCount = 0;
+
+void initializeDisplay() {
+  // Initialize I2C with custom pins
+  Wire.begin(I2C_SDA, I2C_SCL);
+  delay(100);
+  
+  // Try both possible I2C addresses
+  bool displayFound = false;
+  
+  // Try address 0x3C first
+  if (display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
+    displayFound = true;
+    Serial.println("Display found at 0x3C");
+  }
+  // Try address 0x3D if 0x3C fails
+  else {
+    Adafruit_SSD1306 display2(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+    if (display2.begin(SSD1306_SWITCHCAPVCC, 0x3D)) {
+      displayFound = true;
+      display = display2;
+      Serial.println("Display found at 0x3D");
+    }
+  }
+  
+  if (!displayFound) {
+    Serial.println("SSD1306 not found!");
+    // Continue anyway - LoRa will still work
+    return;
+  }
+  
+  // Clear display and set text properties
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+  display.println("LoRa TX");
+  display.println("Initializing...");
+  display.display();
+  Serial.println("Display initialized!");
+}
+
+void initializeLoRa() {
+  // Initialize SPI
+  SPI.begin(5, 19, 27, 18);  // SCK=5, MISO=19, MOSI=27, SS=18
+  
+  // Set up LoRa pins
+  LoRa.setPins(LORA_CS, LORA_RST, LORA_DIO0);
+  
+  // Initialize LoRa
+  if (!LoRa.begin(LORA_FREQ)) {
+    Serial.println("LoRa initialization failed!");
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setTextColor(SSD1306_WHITE);
+    display.setCursor(0, 0);
+    display.println("LoRa TX");
+    display.println("INIT FAILED");
+    display.display();
+    while (1);
+  }
+  
+  Serial.println("LoRa initialized successfully!");
+  
+  // Set LoRa parameters
+  LoRa.setTxPower(20);
+  LoRa.setSpreadingFactor(7);
+  LoRa.setSignalBandwidth(125E3);
+  LoRa.setCodingRate4(5);
+}
+
+void displayStatus(String status, String message = "") {
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  
+  // Title
+  display.setCursor(0, 0);
+  display.println("LoRa TX");
+  
+  // Separator
+  display.drawLine(0, 10, SCREEN_WIDTH, 10, SSD1306_WHITE);
+  
+  // Status
+  display.setCursor(0, 15);
+  display.println(status);
+  
+  // Message content
+  if (message.length() > 0) {
+    display.setCursor(0, 30);
+    display.println("MSG:");
+    display.setCursor(0, 40);
+    display.println(message);
+  }
+  
+  // Statistics
+  display.setCursor(0, 55);
+  display.println("Count: " + String(messageCount));
+  
+  display.display();
+}
+
+void sendMessage() {
+  String message = "Hello from TX #" + String(messageCount);
+  
+  displayStatus("Sending...", message);
+  
+  Serial.print("Sending: ");
+  Serial.println(message);
+  
+  // Send packet
+  LoRa.beginPacket();
+  LoRa.print(message);
+  LoRa.endPacket();
+  
+  messageCount++;
+  
+  delay(500);
+  displayStatus("Sent OK", message);
+}
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+  
+  Serial.println("\n\nLoRa Transmitter Startup");
+  Serial.println("Board: Heltec WiFi LoRa 32");
+  Serial.println("Frequency: 915 MHz");
+  
+  initializeDisplay();
+  initializeLoRa();
+  
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+  display.println("LoRa TX");
+  display.println("Ready!");
+  display.println("Sending every 2s");
+  display.display();
+  
+  Serial.println("Transmitter ready!");
+  delay(1000);
+}
+
+void loop() {
+  // Send message every 2 seconds
+  if (millis() - lastSendTime >= sendInterval) {
+    lastSendTime = millis();
+    sendMessage();
+  }
+  
+  delay(100);
+}
